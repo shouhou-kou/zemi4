@@ -1,0 +1,769 @@
+手の動作を検知するVR
+
+from collections import deque
+from ast import literal_eval
+from imutils.video import VideoStream
+from threading import Thread
+import cv2
+import imutils
+import numpy as np
+import sys
+import re
+import time
+import socket
+import getopt
+import math 
+import copy
+
+
+
+if len(sys.argv) != 3:
+	print 'Wrong options'
+	exit(1)
+
+if "red" in sys.argv[1]:
+	filename = 'red.txt'
+else:
+	filename = 'blue.txt'
+
+number = int(re.search(r'\d+', sys.argv[2]).group())
+
+data = []
+
+while True:
+
+	#カメラデータの読み込み
+	videoSrc = VideoStream(src=number).start()    
+	
+	
+	frame = videoSrc.read()
+	
+	if frame is None:
+		continue
+	
+	frame = imutils.resize(frame, width=600)
+	
+	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+	## スムーズ化
+	gray = cv2.GaussianBlur(gray,(5,5),0);
+	gray = cv2.medianBlur(gray,7)
+	
+	# 端の検出
+	gray = cv2.adaptiveThreshold(gray,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,\
+            cv2.THRESH_BINARY,11,3.5)
+	
+	edit = cv2.erode(gray.copy(), None, iterations=5)
+	edit = cv2.dilate(edit, None, iterations=5)
+	## 円の検出
+	circles = cv2.HoughCircles(edit, cv2.HOUGH_GRADIENT, 1, 200, param1=30, param2=45, minRadius=0, maxRadius=200)
+	if circles is not None:
+		## ｘｙ座標の変換
+		circles = np.round(circles[0, :]).astype("int")
+		
+		for (x, y, r) in circles:
+			# 出力画像に円を描く
+			# 円の中心と一致
+			cv2.circle(frame, (x, y), r, (0, 255, 0), 4)
+			cv2.rectangle(frame, (x - 5, y - 5), (x + 5, y + 5), (0, 128, 255), -1)
+			if x != 0 and y != 0:
+				data.append((x,y,r))
+	# 特定状況下プログラムを終えるようにする
+	cv2.imshow('Main Output', frame)
+	cv2.imshow('Grayscale', gray)
+	cv2.imshow('Calibrated Detection', edit)
+	if len(data) >= 30:
+		break
+	if cv2.waitKey(1) & 0xFF == ord('q'):
+		break
+cv2.destroyAllWindows()
+time.sleep(5)
+if len(data) >= 30:
+	avgX, avgY = 0, 0
+	for i in range(len(data)):
+		avgX += data[i][0]
+		avgY += data[i][1]
+	avgX = int(avgX / 30)
+	avgY = int(avgY / 30)
+	pixel = frame[avgX, avgY]
+	blurred = cv2.GaussianBlur(frame, (11, 11), 0)
+	hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
+	hsvPixel = hsv[avgX, avgY]
+	lower = ((hsvPixel[0] - 10) if hsvPixel[0] >= 10 else 0, (hsvPixel[1] - 10) if hsvPixel[1] >= 10 else 0, (hsvPixel[2] - 40) if hsvPixel[2] >= 40 else 0)
+	higher = (hsvPixel[0] + 10, hsvPixel[1] + 10, hsvPixel[2] + 40)
+
+	lower = np.array(lower, np.uint8)
+	higher = np.array(higher, np.uint8)
+	
+	print lower 
+	print higher
+	while True:
+
+		#カメラデータの読み込み
+		videoSrc = VideoStream(src=number).start()    
+
+		
+		frame = videoSrc.read()
+		
+		frame = imutils.resize(frame, width=600)
+		blurred = cv2.GaussianBlur(frame, (11, 11), 0)
+		hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
+		
+		mask = cv2.inRange(hsv, lower, higher)
+		mask = cv2.erode(mask, None, iterations=2)
+		mask = cv2.dilate(mask, None, iterations=2)
+		cv2.rectangle(hsv, (avgX - 5, avgY - 5), (avgX + 5, avgY + 5), (0, 128, 255), -1)
+		cv2.imshow('Calibrated Detection', mask)
+		cv2.imshow('Main Output', frame)
+		cv2.imshow('HSV Output', hsv)
+		if cv2.waitKey(1) & 0xFF == ord('q'):
+			break
+text_file = open(filename, "w")
+text_file.close()
+print 'values calibrated'
+print pixel
+print lower
+print higher
+for i in range(len(data)):
+		print str(data[i][0]) + ", " + str(data[i][0])
+cv2.destroyAllWindows()
+
+## すべてのカメラから表示
+
+from imutils.video import VideoStream
+import cv2
+import imutils
+
+index = 0
+arr = []
+while True:
+    cap = cv2.VideoCapture(index)
+    if not cap.read()[0]:
+        break
+    else:
+        arr.append(index)
+    cap.release()
+    index += 1
+
+videoSrc = []
+
+for j in range(len(arr)):
+		videoSrc.append(VideoStream(src=int(arr[j])).start())
+name = []
+for j in range(len(arr)):
+	name.append("Camera " + str(arr[j]))
+frame = [None] * len(arr)
+while True:
+	for j in range(len(arr)):
+		frame[j] = videoSrc[j].read()
+		frame[j] = imutils.resize(frame[j], width=600)
+	for j in range(len(arr)):
+		cv2.imshow(name[j], frame[j])
+	if cv2.waitKey(1) & 0xFF == ord('q'):
+		break
+cv2.destroyAllWindows()
+
+
+## 深さ状況を送る
+data = deque([])
+IP = '127.0.0.1'
+
+def socketSend(UDP_PORT):
+	sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+	while True:
+		try:
+			temp = data.popleft()
+			sock.sendto((temp).encode(), (IP, UDP_PORT))
+		except Exception as e:
+			continue
+
+if __name__ == '__main__':
+	camera, port, blueLower = None, None, None
+	debug = 0
+	try:
+		opts, args = getopt.getopt(sys.argv[1:], 'c:p:db:', ['camera=', 'port=', 'debug', 'blue='])
+	except getopt.GetoptError:
+		print 'Wrong options'
+		exit(1)
+	for opt, arg in opts:
+		if opt in ('-c', '--camera'):
+			camera = arg
+		if opt in ('-p', '--port'):
+			port = int(arg)
+		if opt in ('-d', '--debug'):
+			debug = 1
+		if opt in ('-b', '--blue'):
+			blueLower = literal_eval(arg)
+	## HSV数値を青に活用する
+	if blueLower is None:
+		blueLower = (90, 170, 60)
+	upper = (255, 255, 255)
+	videoSrc = VideoStream(src=int(camera)).start()
+	## カメラ起動2秒
+	time.sleep(2.0)
+	## UDPの送信を開始
+	dataSender = Thread(target=socketSend, args=(port,))
+	dataSender.start()
+	
+	while True:
+		# 現在のフレームを捉える
+		frame = videoSrc.read()
+ 
+		# フレームサイズの定義しなおし
+		frame = imutils.resize(frame, width=600)
+		blurred = cv2.GaussianBlur(frame, (11, 11), 0)
+		hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
+ 
+		# 赤の構築
+		mask = cv2.inRange(hsv, blueLower, upper)
+		mask = cv2.erode(mask, None, iterations=2)
+		mask = cv2.dilate(mask, None, iterations=2)
+		
+		pixelCount = cv2.countNonZero(mask)
+		
+		try:
+			distance = 209.482/(pow(pixelCount, 0.3362474781439139))
+			data.append(distance)
+		except Exception as e:
+			distance = 'Unavailable'
+		# ラメを画面に表示
+		if debug is 1:
+			cv2.imshow("Frame", frame)
+			key = cv2.waitKey(1) & 0xFF
+			cv2.imshow("Threshold", mask)
+			print distance
+            
+def socketSend(UDP_PORT):
+
+	sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+	sock.sendto(("JUMP!").encode(), (IP, UDP_PORT))
+
+
+
+if __name__ == '__main__':
+	camera, port = None, None
+
+	debug = 0
+
+	try:
+
+		opts, args = getopt.getopt(sys.argv[1:], 'c:p:d', ['camera=', 'port=', 'debug'])
+
+	except getopt.GetoptError:
+
+		exit(1)
+
+	for opt, arg in opts:
+
+		if opt in ('-c', '--camera'):
+
+			camera = arg
+
+		if opt in ('-p', '--port'):
+
+			port = arg
+
+		if opt in ('-d', '--debug'):
+
+			debug = 1
+
+	
+
+	redLower = (170, 150, 60)
+
+	blueLower = (90, 170, 60)
+
+	upper = (255, 255, 255)
+
+	videoSrc = VideoStream(src=int(camera)).start()
+
+	
+
+	time.sleep(2.0)
+
+	
+	while True:
+
+		
+
+		frame = videoSrc.read()
+
+ 
+
+		frame = imutils.resize(frame, width=600)
+
+		blurred = cv2.GaussianBlur(frame, (11, 11), 0)
+
+		hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
+
+		
+
+		mask = cv2.inRange(hsv, blueLower, upper)
+
+		mask = cv2.erode(mask, None, iterations=2)
+
+		mask = cv2.dilate(mask, None, iterations=2)
+
+
+		
+		# cnts = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+		
+		print cv2.countNonZero(mask)
+		
+		
+		if debug is 1:
+
+			cv2.imshow("Frame", frame)
+			cv2.imshow("Threshold", mask)
+
+			key = cv2.waitKey(1) & 0xFF
+            
+lowB = 255;
+lowG = 255;
+lowR = 255;
+
+highB = 0;
+highG = 0;
+highR = 0;
+
+stepNum = 0;
+
+while stepNum == 0:
+
+    # カメラ起動
+    camera = cv2.VideoCapture(0)
+    camera.set(10, 200) 
+
+    while camera.isOpened():
+
+        #メインカメラ
+        ret, frame = camera.read()
+        frame = cv2.bilateralFilter(frame, 5, 50, 100)  
+        frame = cv2.flip(frame, 1)  #水平方向フリップ
+
+        k = cv2.waitKey(10)
+        if k == 27:  # ESCで脱出
+            break
+
+        cv2.putText(frame, 'O', (300, 110), cv2.FONT_ITALIC, 0.3, 255)
+        cv2.putText(frame, 'O', (225, 135), cv2.FONT_ITALIC, 0.3, 255)
+        cv2.putText(frame, 'O', (385, 140), cv2.FONT_ITALIC, 0.3, 255)
+        cv2.putText(frame, 'O', (460, 215), cv2.FONT_ITALIC, 0.3, 255)
+        cv2.putText(frame, 'O', (100, 285), cv2.FONT_ITALIC, 0.3, 255)
+        cv2.putText(frame, 'O', (310, 350), cv2.FONT_ITALIC, 0.3, 255)
+        cv2.imshow('Video', frame)
+
+        color = frame[300, 110]
+        rVal = color[0].asType(numpy.int)
+        gVal = color[1]
+        bVal = color[2]
+
+        ret, frame2 = camera.read()
+        frame2 = cv2.bilateralFilter(frame2, 5, 50, 100)  
+        frame2 = cv2.flip(frame2, 1)
+
+        font = cv2.FONT_HERSHEY_SIMPLEX
+
+        print "" + rVal
+
+        cv2.putText(frame2,'OpenCV Tuts!',(300,110), font, 1, (rVal,gVal,bVal), 2, cv2.LINE_AA)
+
+        cv2.imshow('Color', frame2)
+
+        '''
+        color = frame[300, 110]
+        
+        if color[0] < lowB :
+            lowB = color[0]
+        if color[1] < lowG :
+            lowG = color[1]
+        if color[2] < lowR :
+            lowR = color[2]
+        if color[0] > highB :
+            highB = color[0]
+        if color[1] > highG :
+            highG = color[1]
+        if color[2] > highR :
+            highR = color[2]
+        color = frame[225, 135]
+        
+        if color[0] < lowB :
+            lowB = color[0]
+        if color[1] < lowG :
+            lowG = color[1]
+        if color[2] < lowR :
+            lowR = color[2]
+        if color[0] > highB :
+            highB = color[0]
+        if color[1] > highG :
+            highG = color[1]
+        if color[2] > highR :
+            highR = color[2]
+        color = frame[385, 140]
+        
+        if color[0] < lowB :
+            lowB = color[0]
+        if color[1] < lowG :
+            lowG = color[1]
+        if color[2] < lowR :
+            lowR = color[2]
+        if color[0] > highB :
+            highB = color[0]
+        if color[1] > highG :
+            highG = color[1]
+        if color[2] > highR :
+            highR = color[2]
+        color = frame[460, 215]
+        
+        if color[0] < lowB :
+            lowB = color[0]
+        if color[1] < lowG :
+            lowG = color[1]
+        if color[2] < lowR :
+            lowR = color[2]
+        if color[0] > highB :
+            highB = color[0]
+        if color[1] > highG :
+            highG = color[1]
+        if color[2] > highR :
+            highR = color[2]
+        color = frame[100, 285]
+        
+        if color[0] < lowB :
+            lowB = color[0]
+        if color[1] < lowG :
+            lowG = color[1]
+        if color[2] < lowR :
+            lowR = color[2]
+        if color[0] > highB :
+            highB = color[0]
+        if color[1] > highG :
+            highG = color[1]
+        if color[2] > highR :
+            highR = color[2]
+        color = frame[310, 350]
+        
+        if color[0] < lowB :
+            lowB = color[0]
+        if color[1] < lowG :
+            lowG = color[1]
+        if color[2] < lowR :
+            lowR = color[2]
+        if color[0] > highB :
+            highB = color[0]
+        if color[1] > highG :
+            highG = color[1]
+        if color[2] > highR :
+            highR = color[2]
+        print "LOW: "
+        print lowR
+        print lowG
+        print lowB
+        print "HIGH: "
+        print highR
+        print highG
+        print highB
+    '''
+while stepNum == 1:
+
+    # カメラ起動
+    camera = cv2.VideoCapture(0)
+    camera.set(10, 200) 
+
+    def calculateFingers(res, drawing):
+        # 凸検知
+        hull = cv2.convexHull(res, returnPoints=False)
+        if len(hull) > 3:
+            defects = cv2.convexityDefects(res, hull)
+            if defects is not None:
+                cnt = 0
+                for i in range(defects.shape[0]):  # 角度計算
+                    s, e, f, d = defects[i][0]
+                    start = tuple(res[s][0])
+                    end = tuple(res[e][0])
+                    far = tuple(res[f][0])
+                    a = math.sqrt((end[0] - start[0]) ** 2 + (end[1] - start[1]) ** 2)
+                    b = math.sqrt((far[0] - start[0]) ** 2 + (far[1] - start[1]) ** 2)
+                    c = math.sqrt((end[0] - far[0]) ** 2 + (end[1] - far[1]) ** 2)
+                    angle = math.acos((b ** 2 + c ** 2 - a ** 2) / (2 * b * c)) 
+                    if angle <= math.pi / 2:  
+                        if cnt < 4:
+                            cnt += 1
+                            cv2.circle(drawing, far, 8, [211, 84, 0], -1)
+                if cnt > 0:
+                    if cnt < 6:
+                        return True, cnt+1
+                else:
+                    return True, 0
+        return False, 0
+
+    while camera.isOpened():
+
+        #メインカメラ
+        ret, frame = camera.read()
+        frame = cv2.bilateralFilter(frame, 5, 50, 100) 
+        frame = cv2.flip(frame, 1) 
+
+        #バックグラウンド
+        bgModel = cv2.createBackgroundSubtractorMOG2(0, 50)
+        fgmask = bgModel.apply(frame)
+
+        kernel = np.ones((3, 3), np.uint8)
+        fgmask = cv2.erode(fgmask, kernel, iterations=1)
+        img = cv2.bitwise_and(frame, frame, mask=fgmask)
+
+        # 肌検知
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        lower = np.array([100, 100, 100], dtype="uint8")
+        upper = np.array([255, 255, 255], dtype="uint8")
+        skinMask = cv2.inRange(hsv, lower, upper)
+        cv2.imshow('Threshold Hands', skinMask)
+
+        
+        skinMask1 = copy.deepcopy(skinMask)
+        _,contours, hierarchy = cv2.findContours(skinMask1, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        length = len(contours)
+        maxArea = -1
+        if length > 0:
+            for i in xrange(length):
+                temp = contours[i]
+                area = cv2.contourArea(temp)
+                if area > maxArea:
+                    maxArea = area
+                    ci = i
+
+            res = contours[ci]
+            hull = cv2.convexHull(res)
+            drawing = np.zeros(img.shape, np.uint8)
+            cv2.drawContours(drawing, [res], 0, (0, 255, 0), 2)
+            cv2.drawContours(drawing, [hull], 0, (0, 0, 255), 3)
+
+            isFinishCal, cnt = calculateFingers(res, drawing)
+            print "Fingers", cnt
+            cv2.imshow('output', drawing)
+
+        k = cv2.waitKey(10)
+        if k == 27:  
+            break
+
+        cv2.putText(frame, 'O', (300, 110), cv2.FONT_ITALIC, 0.3, 255)
+        cv2.putText(frame, 'O', (225, 135), cv2.FONT_ITALIC, 0.3, 255)
+        cv2.putText(frame, 'O', (385, 140), cv2.FONT_ITALIC, 0.3, 255)
+        cv2.putText(frame, 'O', (460, 215), cv2.FONT_ITALIC, 0.3, 255)
+        cv2.putText(frame, 'O', (100, 285), cv2.FONT_ITALIC, 0.3, 255)
+        cv2.putText(frame, 'O', (310, 350), cv2.FONT_ITALIC, 0.3, 255)
+        cv2.imshow('Video', frame);
+        
+port = 3000
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.bind(('127.0.0.1', port))
+print "waiting on port:", port
+while 1:
+	data, addr = s.recvfrom(1024)
+	print data
+    
+
+data = deque([])
+
+
+def socketSend(UDP_PORT):
+	sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+	while True:
+		try:
+			temp = data.popleft()
+			sock.sendto((temp).encode(), (IP, UDP_PORT))
+		except Exception as e:
+			continue
+
+if __name__ == '__main__':
+	camera, port = None, None
+	debug = 0
+	redLower, blueLower = None, None
+	try:
+		opts, args = getopt.getopt(sys.argv[1:], 'c:p:dr:b:', ['camera=', 'port=', 'debug', 'red=', 'blue='])
+	except getopt.GetoptError:
+		print 'Wrong options'
+		exit(1)
+	for opt, arg in opts:
+		if opt in ('-c', '--camera'):
+			camera = arg
+		if opt in ('-p', '--port'):
+			port = int(arg)
+		if opt in ('-d', '--debug'):
+			debug = 1
+		if opt in ('-r', '--red'):
+			redLower = literal_eval(arg)
+		if opt in ('-b', '--blue'):
+			blueLower = literal_eval(arg)
+	
+	
+	if redLower is None:	
+		redLower = (170, 150, 60)
+	if blueLower is None:
+		blueLower = (90, 170, 60)
+	
+	upper = (255, 255, 255)
+	videoSrc = VideoStream(src=int(camera)).start()
+	
+	time.sleep(2.0)
+	## UDPデータの送信
+	dataSender = Thread(target=socketSend, args=(port,))
+	dataSender.start()
+	
+	while True:
+		
+		frame = videoSrc.read()
+ 
+	
+		frame = imutils.resize(frame, width=600)
+		blurred = cv2.GaussianBlur(frame, (11, 11), 0)
+		hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
+ 
+		
+		mask = cv2.inRange(hsv, redLower, upper)
+		mask = cv2.erode(mask, None, iterations=2)
+		mask = cv2.dilate(mask, None, iterations=2)
+		
+		cnts = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL,
+			cv2.CHAIN_APPROX_SIMPLE)
+		cnts = imutils.grab_contours(cnts)
+		center = None
+ 
+		# 検出がある場合のみ次へ進む
+		if len(cnts) > 0:
+			# 最大を見つける
+			
+			c = max(cnts, key=cv2.contourArea)
+			((redX, redY), radius) = cv2.minEnclosingCircle(c)
+			M = cv2.moments(c)
+			center = (int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"]))
+ 
+		
+			if radius > 12:
+				# 円を描く
+				# リストのアップデート
+				cv2.circle(frame, (int(redX), int(redY)), int(radius),
+					(0, 0, 255), 2)
+				cv2.circle(frame, center, 5, (255, 255, 255), -1)
+				strRed = 'Red (x, y): ' + str(int(redX)) + ', ' + str(int(redY))
+				data.append(strRed)
+				if debug is 1:
+					print strRed
+		## 青
+		
+		mask = cv2.inRange(hsv, blueLower, upper)
+		mask = cv2.erode(mask, None, iterations=2)
+		mask = cv2.dilate(mask, None, iterations=2)
+		
+		cnts = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL,
+			cv2.CHAIN_APPROX_SIMPLE)
+		cnts = imutils.grab_contours(cnts)
+		center = None
+ 
+		
+		if len(cnts) > 0:
+			
+			c = max(cnts, key=cv2.contourArea)
+			((blueX, blueY), radius) = cv2.minEnclosingCircle(c)
+			M = cv2.moments(c)
+			center = (int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"]))
+ 
+		
+			if radius > 12:
+				
+				cv2.circle(frame, (int(blueX), int(blueY)), int(radius),
+					(255, 0, 0), 2)
+				cv2.circle(frame, center, 5, (255, 255, 255), -1)
+				strBlue = 'Blue (x, y): ' + str(int(blueX)) + ', ' + str(int(blueY))
+				data.append(strBlue)
+				if debug is 1:
+					print strBlue
+		# フレーム表示
+		if debug is 1:
+			cv2.imshow("Frame", frame)
+			key = cv2.waitKey(1) & 0xFF
+            
+data = deque([])
+
+
+def socketSend(UDP_PORT):
+	sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+	while True:
+		try:
+			temp = data.popleft()
+			sock.sendto((temp).encode(), (IP, UDP_PORT))
+		except Exception as e:
+			continue
+
+if __name__ == '__main__':
+	camera, port = None, None
+	debug = 0
+	blueLower = None
+	try:
+		opts, args = getopt.getopt(sys.argv[1:], 'c:p:db:', ['camera=', 'port=', 'debug', 'blue='])
+	except getopt.GetoptError:
+		print 'Wrong options'
+		exit(1)
+	for opt, arg in opts:
+		if opt in ('-c', '--camera'):
+			camera = arg
+		if opt in ('-p', '--port'):
+			port = int(arg)
+		if opt in ('-d', '--debug'):
+			debug = 1
+		if opt in ('-b', '--blue'):
+			blueLower = literal_eval(arg)
+	
+	
+	if blueLower is None:
+		blueLower = (90, 170, 60)
+	
+	upper = (255, 255, 255)
+	videoSrc = VideoStream(src=int(camera)).start()
+	
+	time.sleep(2.0)
+	
+	dataSender = Thread(target=socketSend, args=(port,))
+	dataSender.start()
+	
+	while True:
+		
+		frame = videoSrc.read()
+ 
+		
+		frame = imutils.resize(frame, width=600)
+		blurred = cv2.GaussianBlur(frame, (11, 11), 0)
+		hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
+ 
+		
+		mask = cv2.inRange(hsv, blueLower, upper)
+		mask = cv2.erode(mask, None, iterations=2)
+		mask = cv2.dilate(mask, None, iterations=2)
+		
+		cnts = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL,
+			cv2.CHAIN_APPROX_SIMPLE)
+		cnts = imutils.grab_contours(cnts)
+		center = None
+ 
+		
+		if len(cnts) > 0:
+			
+			c = max(cnts, key=cv2.contourArea)
+			((blueX, blueY), radius) = cv2.minEnclosingCircle(c)
+			M = cv2.moments(c)
+			center = (int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"]))
+ 
+		
+			if radius > 12:
+				
+				cv2.circle(frame, (int(blueX), int(blueY)), int(radius),
+					(255, 0, 0), 2)
+				cv2.circle(frame, center, 5, (255, 255, 255), -1)
+				strBlue = 'Blue (x, y): ' + str(int(blueX)) + ', ' + str(int(blueY))
+				data.append(strBlue)
+				if debug is 1:
+					print strBlue
+		
+		if debug is 1:
+			cv2.imshow("Frame", frame)
+			key = cv2.waitKey(1) & 0xFF
